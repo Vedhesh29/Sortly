@@ -7,10 +7,11 @@ from PyQt5.QtWidgets import (
     QLineEdit, QFileDialog, QComboBox, QTextEdit, QMessageBox, QTableWidget,
     QTableWidgetItem, QHeaderView, QAbstractItemView, QSizePolicy, QMenu
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QPoint
 from PyQt5.QtGui import QPalette, QColor, QFontDatabase, QFont, QIcon
 from sorter import scan_and_sort
 from undo_sort import undo_moves
+from PyQt5.QtCore import QTimer
 
 CONFIG_DIR = "configs"
 DEFAULT_CONFIG_NAME = "default"
@@ -30,15 +31,19 @@ DEFAULT_RULES = {
     ".lnk": {"folder": "Shortcuts", "subfolder": None}
 }
 
+def resource_path(relative_path):
+    base_path = getattr(sys, '_MEIPASS', os.path.abspath("."))
+    return os.path.join(base_path, relative_path)
+
 class FileSorterGUI(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Sortly")
-        self.setWindowIcon(QIcon("icons/icon.ico"))
+        self.setWindowIcon(QIcon(resource_path("icons/icon.ico")))
         self.resize(1300, 1100)
         self.setMinimumSize(900, 500)
 
-        font_id = QFontDatabase.addApplicationFont("Oswald-Regular.ttf")
+        font_id = QFontDatabase.addApplicationFont(resource_path("Oswald-Regular.ttf"))
         families = QFontDatabase.applicationFontFamilies(font_id)
         if families:
             self.setFont(QFont(families[0], 10))
@@ -62,6 +67,8 @@ class FileSorterGUI(QWidget):
                 background-color: #2a2a2a;
                 color: white;
                 gridline-color: #444;
+                selection-background-color: #3b82f6;
+                selection-color: black;
             }
             QTableWidget QTableCornerButton::section {
                 background-color: #333;
@@ -97,24 +104,6 @@ class FileSorterGUI(QWidget):
                 font-weight: bold;
                 color: white;
             }
-                           
-            QMenu {
-                background-color: #2a2a2a;
-                color: white;
-                border: 1px solid #444;
-                padding: 5px;
-            }
-
-            QMenu::item {
-                padding: 6px 20px;
-                background-color: transparent;
-            }
-
-            QMenu::item:selected {
-                background-color: #FFFFFF; 
-                color: black; 
-            }                         
-            
         """
         )
 
@@ -126,20 +115,15 @@ class FileSorterGUI(QWidget):
         self.setLayout(main_layout)
 
         sidebar = QVBoxLayout()
-        rule_label = QLabel("Sorting Rules:")
-        sidebar.addWidget(rule_label)
+        sidebar.addWidget(QLabel("Sorting Rules:"))
 
         self.table = QTableWidget(0, 3)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.table.customContextMenuRequested.connect(self.show_table_context_menu)
         self.table.setHorizontalHeaderLabels(["File Extension", "Folder Name", "Subfolder Rule"])
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setEditTriggers(QAbstractItemView.DoubleClicked)
-        self.table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self.show_context_menu)
         sidebar.addWidget(self.table)
 
         config_btn_layout = QHBoxLayout()
@@ -173,7 +157,8 @@ class FileSorterGUI(QWidget):
         sidebar.addWidget(create_btn)
         sidebar.addWidget(delete_config_btn)
 
-        self.load_available_configs()
+        self.populate_table()  # empty table initially
+        QTimer.singleShot(0, self.load_available_configs)
 
         main_area = QVBoxLayout()
 
@@ -222,53 +207,67 @@ class FileSorterGUI(QWidget):
 
         self.populate_table()
 
-    def show_table_context_menu(self, pos):
-        selected_rows = set(index.row() for index in self.table.selectedIndexes())
+    def delete_selected_rule(self):
+        selected_rows = self.table.selectionModel().selectedRows()
         if not selected_rows:
             return
 
+        for model_index in sorted(selected_rows, key=lambda x: x.row(), reverse=True):
+            row = model_index.row()
+            ext_item = self.table.item(row, 0)
+            ext = ext_item.text().strip().lower() if ext_item else None
+            if ext and ext in self.sort_config:
+                del self.sort_config[ext]
+            self.table.removeRow(row)
+        self.log(f"Deleted {len(selected_rows)} rule(s).")
+
+    def show_context_menu(self, pos):
         menu = QMenu(self)
 
-        delete_icon = QIcon("icons/delete.svg")
-        duplicate_icon = QIcon("icons/duplicate.svg")
-
-        delete_action = menu.addAction(delete_icon, "Delete Rule(s)")
-        duplicate_action = menu.addAction(duplicate_icon, "Duplicate Rule(s)")
-
+        menu.setStyleSheet("""
+        QMenu {
+            background-color: #2a2a2a;
+            color: white;
+            border: 1px solid #444;
+        }
+        QMenu::item {
+            background-color: transparent;
+            padding: 6px 20px;
+        }
+        QMenu::item:selected {
+            background-color: #FFFFFF; 
+            color: black;
+        }
+    """)
+        
+        delete_action = menu.addAction(QIcon(resource_path("icons/delete.svg")), "Delete Selected Rule(s)")
+        duplicate_action = menu.addAction(QIcon(resource_path("icons/duplicate.svg")), "Duplicate Selected Rule")
         action = menu.exec_(self.table.viewport().mapToGlobal(pos))
-
         if action == delete_action:
-            for row in sorted(selected_rows, reverse=True):
-                ext_item = self.table.item(row, 0)
-                if ext_item:
-                    ext = ext_item.text().strip().lower()
-                    if ext in self.sort_config:
-                        del self.sort_config[ext]
-                self.table.removeRow(row)
-
+            self.delete_selected_rule()
         elif action == duplicate_action:
-            for row in sorted(selected_rows):
-                ext_item = self.table.item(row, 0)
-                folder_item = self.table.item(row, 1)
-                subfolder_widget = self.table.cellWidget(row, 2)
+            self.duplicate_selected_rule()
 
-                if ext_item and folder_item:
-                    ext = ext_item.text().strip().lower()
-                    folder = folder_item.text().strip()
-                    subfolder = subfolder_widget.currentText() if subfolder_widget else "None"
+    def duplicate_selected_rule(self):
+        selected = self.table.selectionModel().selectedRows()
+        for index in selected:
+            row = index.row()
+            ext = self.table.item(row, 0).text()
+            folder = self.table.item(row, 1).text()
+            subfolder_widget = self.table.cellWidget(row, 2)
+            subfolder = subfolder_widget.currentText() if subfolder_widget else "None"
 
-                    new_row = self.table.rowCount()
-                    self.table.insertRow(new_row)
-                    self.table.setItem(new_row, 0, QTableWidgetItem(ext))
-                    self.table.setItem(new_row, 1, QTableWidgetItem(folder))
-                    new_subfolder_combo = QComboBox()
-                    new_subfolder_combo.addItems(["None", "Year", "MusicType"])
-                    new_subfolder_combo.setCurrentText(subfolder)
-                    new_subfolder_combo.setFocusPolicy(Qt.NoFocus)
-                    new_subfolder_combo.installEventFilter(self)
-                    self.table.setCellWidget(new_row, 2, new_subfolder_combo)
+            self.add_rule_row()
+            new_row = self.table.rowCount() - 1
+            self.table.setItem(new_row, 0, QTableWidgetItem(ext))
+            self.table.setItem(new_row, 1, QTableWidgetItem(folder))
+            new_combo = QComboBox()
+            new_combo.addItems(["None", "Year", "MusicType"])
+            new_combo.setCurrentText(subfolder)
+            new_combo.setFocusPolicy(Qt.NoFocus)
+            new_combo.installEventFilter(self)
+            self.table.setCellWidget(new_row, 2, new_combo)
 
-    
     def browse_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Select Folder")
         if folder:
@@ -279,24 +278,16 @@ class FileSorterGUI(QWidget):
         self.table.insertRow(row_pos)
         self.table.setItem(row_pos, 0, QTableWidgetItem(".ext"))
         self.table.setItem(row_pos, 1, QTableWidgetItem("FolderName"))
-        subfolder_combo = QComboBox()
-        subfolder_combo.addItems(["None", "Year", "MusicType"])
-        subfolder_combo.setFocusPolicy(Qt.NoFocus)
-        subfolder_combo.installEventFilter(self)
-        self.table.setCellWidget(row_pos, 2, subfolder_combo)
+        combo = QComboBox()
+        combo.addItems(["None", "Year", "MusicType"])
+        combo.setFocusPolicy(Qt.NoFocus)
+        combo.installEventFilter(self)
+        self.table.setCellWidget(row_pos, 2, combo)
 
     def eventFilter(self, source, event):
         if event.type() == event.Wheel and isinstance(source, QComboBox):
             return True
         return super().eventFilter(source, event)
-
-    def delete_selected_rule(self):
-        selected = self.table.currentRow()
-        if selected >= 0:
-            ext = self.table.item(selected, 0).text().strip().lower()
-            if ext in self.sort_config:
-                del self.sort_config[ext]
-            self.table.removeRow(selected)
 
     def save_current_config(self):
         config_name = self.config_selector.currentText()
@@ -327,8 +318,7 @@ class FileSorterGUI(QWidget):
                 self.sort_config = json.load(f)
         self.populate_table()
         self.current_config_name = name
-        if hasattr(self, 'log_output'):
-            self.log(f"Loaded config: {name}")
+        self.log(f"Loaded config: {name}")
 
     def create_new_config(self):
         name = self.new_config_input.text().strip()
@@ -362,8 +352,7 @@ class FileSorterGUI(QWidget):
         self.config_selector.clear()
         for filename in os.listdir(CONFIG_DIR):
             if filename.endswith(".json"):
-                name = filename[:-5]
-                self.config_selector.addItem(name)
+                self.config_selector.addItem(filename[:-5])
 
     def reset_to_default(self):
         self.sort_config = DEFAULT_RULES.copy()
@@ -373,19 +362,19 @@ class FileSorterGUI(QWidget):
     def populate_table(self):
         self.table.setRowCount(0)
         for ext, rule in self.sort_config.items():
-            row_pos = self.table.rowCount()
-            self.table.insertRow(row_pos)
-            self.table.setItem(row_pos, 0, QTableWidgetItem(ext))
-            self.table.setItem(row_pos, 1, QTableWidgetItem(rule.get("folder", "")))
-            subfolder_combo = QComboBox()
-            subfolder_combo.addItems(["None", "Year"])
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            self.table.setItem(row, 0, QTableWidgetItem(ext))
+            self.table.setItem(row, 1, QTableWidgetItem(rule.get("folder", "")))
+            combo = QComboBox()
+            combo.addItems(["None", "Year"])
             if ext == ".mp3":
-                subfolder_combo.addItem("MusicType")
+                combo.addItem("MusicType")
             current = rule.get("subfolder", "none")
-            subfolder_combo.setCurrentText(current.capitalize() if current else "None")
-            subfolder_combo.setFocusPolicy(Qt.NoFocus)
-            subfolder_combo.installEventFilter(self)
-            self.table.setCellWidget(row_pos, 2, subfolder_combo)
+            combo.setCurrentText(current.capitalize() if current else "None")
+            combo.setFocusPolicy(Qt.NoFocus)
+            combo.installEventFilter(self)
+            self.table.setCellWidget(row, 2, combo)
 
     def sort_files(self):
         folder = self.folder_input.text().strip()
@@ -400,9 +389,10 @@ class FileSorterGUI(QWidget):
     def _sort_thread(self, folder, behavior):
         summary = scan_and_sort(folder, self.sort_config, behavior)
         self.log("Sorting complete.")
-        self.log("\n--- Summary ---")
-        for k, v in summary.items():
-            self.log(f"{k}: {v}")
+        if summary:
+            self.log("\n--- Summary ---")
+            for k, v in summary.items():
+                self.log(f"{k}: {v}")
 
     def undo_sort(self):
         self.log("Undo started...")

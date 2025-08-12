@@ -1,0 +1,13 @@
+Hey everyone,
+I got tired of my Downloads folder constantly turning into a mess, so I put together a little utility app called Sortly.
+It’s a Windows tool that automatically organizes files into folders based on file type. For example, PDFs into a PDFs folder, images into an Images folder, installers, music, you get the idea.
+You can:
+Customize which file types go where
+Set subfolders by year or music genre
+Undo the last sort if you change your mind
+I priced it at $3 on Gumroad and itch.io to cover my time. If anyone wants to check it out or support it, the links are down below. 
+Totally get if it’s not for everyone, just thought some folks here might find it useful!
+Happy to answer any questions or get feedback.
+Links:
+itch.io
+Gumroad
