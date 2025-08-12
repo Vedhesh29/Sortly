@@ -25,7 +25,7 @@
   },
   ".mp3": {
     "folder": "Audio",
-    "subfolder": "musictype"
+    "subfolder": null
   },
   ".url": {
     "folder": "Internet Shortcuts",
