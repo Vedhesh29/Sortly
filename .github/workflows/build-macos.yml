@@ -1,10 +1,10 @@
 name: Build macOS App
 
 on:
-  workflow_dispatch:  # lets you trigger manually
+  workflow_dispatch:  # run manually from Actions tab
   push:
     tags:
-      - 'v*'  # runs when you push a version tag like v1.0
+      - 'v*'  # runs when you push a tag like v1.0
 
 jobs:
   build:
@@ -28,7 +28,8 @@ jobs:
       run: |
         pyinstaller --onefile --windowed main.py
         cd dist
-        zip -r Sortly-mac.zip main.app
+        mv main.app Sortly.app
+        zip -r Sortly-mac.zip Sortly.app
 
     - name: Upload build as artifact
       uses: actions/upload-artifact@v4
