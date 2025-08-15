@@ -30,59 +30,66 @@ def is_music(file_path):
         pass
     return False
 
-def move_file(file_path, base_folder, subfolder=None, summary=None):
-    file_name = Path(file_path).name
-    target_dir = Path(base_folder)
+def record_move(src, dst, type_):
+    move_history.append({
+        "source": str(src),
+        "destination": str(dst),
+        "type": type_
+    })
 
-    if subfolder == "year":
-        year = get_file_year(file_path)
-        target_dir = target_dir / year
-    elif subfolder == "musictype":
-        target_dir = target_dir / ("Music" if is_music(file_path) else "Other")
-
+def move_file(file_path, target_dir):
     target_dir.mkdir(parents=True, exist_ok=True)
-    target_path = target_dir / file_name
-
-    move_history.append({"source": str(file_path), "destination": str(target_path)})
+    target_path = target_dir / file_path.name
+    record_move(file_path, target_path, "file")
     shutil.move(str(file_path), target_path)
     print(f"Moved {file_path} -> {target_path}")
-
-    # Track in summary
-    if summary is not None:
-        key = str(target_dir.relative_to(file_path.parent.parent if subfolder else file_path.parent))
-        summary[key] = summary.get(key, 0) + 1
 
 def scan_and_sort(folder_path, config, behavior):
     folder = Path(folder_path)
     move_history.clear()
     summary = {}
 
-    # Step 1: Handle folder behavior
-    if behavior == "Sort contents of pre-existing folders":
-        files = list(folder.rglob("*"))  # All files including subfolders
-    elif behavior == "Move pre-existing folders to archive":
+    # --- Handle pre-existing folders ---
+    if behavior == "Move pre-existing folders to archive":
         archive_path = folder / "Archived_Folders"
         archive_path.mkdir(exist_ok=True)
+
         for item in folder.iterdir():
-            if item.is_dir() and item.name not in [rule["folder"] for rule in config.values()]:
-                shutil.move(str(item), archive_path / item.name)
-        files = list(folder.glob("*"))  # Only top-level files after moving folders
-    else:  # "Leave pre-existing folders alone"
-        files = list(folder.glob("*"))
+            if item.is_dir() and item != archive_path and item.name not in [rule["folder"] for rule in config.values()]:
+                target = archive_path / item.name
+                record_move(item, target, "folder")
+                shutil.move(str(item), target)
+                # Add to summary using relative path
+                rel_path = target.relative_to(folder)
+                summary[str(rel_path)] = summary.get(str(rel_path), 0) + len(list(target.rglob("*")))
 
-    # Step 2: Sort files based on rules
+    # --- Gather files to sort ---
+    if behavior == "Sort contents of pre-existing folders":
+        files = [f for f in folder.rglob("*") if f.is_file()]
+    else:
+        files = [f for f in folder.glob("*") if f.is_file()]
+
+    # --- Sort files according to rules ---
     for file in files:
-        if file.is_file():
-            ext = file.suffix.lower()
-            rule = config.get(ext)
-            if rule:
-                target_folder = folder / rule["folder"]
-                subfolder = rule.get("subfolder")
-                move_file(file, target_folder, subfolder, summary)
+        ext = file.suffix.lower()
+        rule = config.get(ext)
+        if rule:
+            target_folder = folder / rule["folder"]
+            subfolder_type = rule.get("subfolder")
+            if subfolder_type == "year":
+                target_folder = target_folder / get_file_year(file)
+            elif subfolder_type == "musictype":
+                target_folder = target_folder / ("Music" if is_music(file) else "Other")
+            move_file(file, target_folder)
+            # Update summary using relative path
+            rel_path = target_folder.relative_to(folder)
+            summary[str(rel_path)] = summary.get(str(rel_path), 0) + 1
 
-    # Save move history for undo
+    # --- Save move history ---
     Path("logs").mkdir(exist_ok=True)
     with open("logs/move_history.json", "w") as f:
         json.dump(move_history, f, indent=2)
 
-    return summary  
+    print("\nSorting complete.")
+    return summary
+

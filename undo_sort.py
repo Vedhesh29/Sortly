@@ -11,34 +11,30 @@ def undo_moves():
     with open(history_path, "r") as f:
         moves = json.load(f)
 
-    touched_folders = set()
+    # Sort by path depth descending to safely undo nested files/folders
+    moves_sorted = sorted(moves, key=lambda x: len(Path(x["destination"]).parts), reverse=True)
 
-    for move in reversed(moves):
+    for move in reversed(moves_sorted):
         src = Path(move["destination"])
         dst = Path(move["source"])
         dst.parent.mkdir(parents=True, exist_ok=True)
-
         try:
             if src.exists():
                 shutil.move(str(src), str(dst))
-                print(f"Restored {src} -> {dst}")
-                touched_folders.add(str(src.parent))
+                print(f"Restored {move['type'].capitalize()} {src} -> {dst}")
         except Exception as e:
             print(f"Error restoring {src}: {e}")
 
-    # Clean up empty folders
-    sorted_folders = sorted(touched_folders, key=lambda x: len(Path(x).parts), reverse=True)
-    for folder in sorted_folders:
+    # Clean up empty folders created during sort
+    all_folders = {Path(m['destination']).parent for m in moves_sorted}
+    for folder in sorted(all_folders, key=lambda x: len(x.parts), reverse=True):
         try:
-            folder_path = Path(folder)
-            while folder_path != folder_path.parent:
-                if any(folder_path.iterdir()):
-                    break
-                folder_path.rmdir()
-                print(f"Deleted empty folder: {folder_path}")
-                folder_path = folder_path.parent
+            while folder.exists() and folder != folder.parent and not any(folder.iterdir()):
+                folder.rmdir()
+                print(f"Deleted empty folder: {folder}")
+                folder = folder.parent
         except Exception as e:
-            print(f"Could not delete {folder}: {e}")
+            print(f"Error cleaning folder {folder}: {e}")
 
     history_path.unlink()
     print("\nUndo complete.")
